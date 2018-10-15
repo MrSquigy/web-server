@@ -1,24 +1,60 @@
+import os
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+from cases import *
+
+IP = '127.0.0.1'
 PORT = 80
 
 class RequestHandler(BaseHTTPRequestHandler):
-    # Handle HTTP requests by returning a fixed 'page'
 
-    # Page to send back - encode to convert string to bytes
-    page = '<html>\n<body>\n<p>Hello, world!</p>\n</body>\n</html>'.encode()
+    error_page = "<html>\n<body>\n<h1>Error accessing {path}</h1>\n<p>{msg}</p>\n</body>\n</html>"
+    listing_page = "<html>\n<body>\n<ul>\n{0}\n</ul>\n</body>\n</html>"
+    Cases = [case_no_file(), case_existing_file(), case_directory_index_file(), case_directory_no_index_file(), case_always_fail()]
 
-    # Handle a GET request
     def do_GET(self):
-        self.send_response(200)
+        try:
+            self.full_path = os.getcwd() + self.path
+
+            for case in self.Cases:
+                if case.test(self):
+                    case.act(self)
+                    break
+        except Exception as msg:
+            self.handle_error(msg)
+    
+    def handle_file(self, full_path):
+        try:
+            with open(full_path, 'rb') as reader:
+                content = reader.read()
+            self.send_content(content)
+        except IOError as msg:
+            self.handle_error(msg)
+
+    def handle_error(self, msg):
+        content = self.error_page.format(path = self.path, msg = msg).encode()
+        self.send_content(content, 404)
+    
+    def list_dir(self, full_path):
+        try:
+            entries = os.listdir(full_path)
+            bullets = ['<li>%s</li>' % e for e in entries if not e.startswith('.')]
+            page = self.listing_page.format('\n'.join(bullets)).encode()
+            self.send_content(page)
+        except OSError as msg:
+            msg = "'%s' cannot be listed: %s" %(self.path, msg)
+            self.handle_error(msg)
+    
+    def send_content(self, content, status = 200):
+        self.send_response(status)
         self.send_header("Content-Type", "text/html")
-        self.send_header("Content-Length", str(len(self.page)))
+        self.send_header("Content-Length", str(len(content)))
         self.end_headers()
-        self.wfile.write(self.page)
+        self.wfile.write(content)
 
 if __name__ == '__main__':
-    serverAddress = ('', PORT)
+    serverAddress = (IP, PORT)
     server = HTTPServer(serverAddress, RequestHandler)
 
     print(time.asctime(), "Server Started")
